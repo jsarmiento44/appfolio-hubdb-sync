@@ -4,7 +4,8 @@ require("dotenv").config(); // load .env variables
 const APPFOLIO_CLIENT_ID = process.env.APPFOLIO_CLIENT_ID;
 const APPFOLIO_CLIENT_SECRET = process.env.APPFOLIO_CLIENT_SECRET;
 const HUBSPOT_API_KEY = process.env.HUBSPOT_API_KEY;
-const HUBDB_TABLE_ID = process.env.HUBDB_TABLE_ID;
+const HUBDB_TABLE_ID_INTERNAL = process.env.HUBDB_TABLE_ID; // full table (existing)
+const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC; // filtered table (new)
 
 console.log("🔑 Full HUBSPOT_API_KEY:", HUBSPOT_API_KEY);
 console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
@@ -176,11 +177,16 @@ async function pushLiveChanges() {
 
   console.log(`📦 Syncing ${listings.length} listings...`);
 
-  for (const listing of listings) {
-    await upsertHubDBRow(listing);
-  }
+ for (const listing of listings) {
+  await upsertHubDBRow(listing, HUBDB_TABLE_ID_INTERNAL); // all units
 
-  await pushLiveChanges();
+  if (listing.posted_to_internet === "Yes") {
+    await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC); // only public ones
+  }
+}
+
+await pushLiveChanges(HUBDB_TABLE_ID_INTERNAL);
+await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
 
   console.log("✅ Sync complete.");
 })();
