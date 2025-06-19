@@ -1,4 +1,4 @@
-// ✅ DEBUG ENHANCEMENT FOR INTERNET TABLE SYNC ISSUE
+// ✅ FINAL REPAIRED SYNC SCRIPT
 
 const axios = require("axios");
 require("dotenv").config();
@@ -35,7 +35,7 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^     .replace(/[^\x20-~    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[^     .replace(/[^\x20-\x7E]/g, "")
     .replace(/[\s\/\\]+/g, "-")
     .replace(/[^a-z0-9-]/g, "")
     .replace(/--+/g, "-")
@@ -71,6 +71,7 @@ function formatRow(listing) {
       : null,
     amenities: listing.unit_amenities || "",
     appliances: listing.unit_appliances || "",
+    utilities: listing.unit_utilities || "",
     billed_as: listing.billed_as || "",
     meta_description: autoGenerateMeta(
       listing.marketing_description,
@@ -120,6 +121,26 @@ async function fetchAppFolioData() {
 
 const failedListings = [];
 
+async function findExistingRowByAddress(address, tableId) {
+  try {
+    const res = await axios.get(
+      `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`,
+      {
+        headers: {
+          Authorization: `Bearer ${HUBSPOT_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    const normalized = address.trim().toLowerCase();
+    return res.data.results.find(
+      (row) => row.values?.address?.trim().toLowerCase() === normalized
+    )?.id || null;
+  } catch (err) {
+    return null;
+  }
+}
+
 async function upsertHubDBRow(listing, tableId) {
   const formatted = formatRow(listing);
 
@@ -133,29 +154,22 @@ async function upsertHubDBRow(listing, tableId) {
     "Content-Type": "application/json",
   };
   const rowUrl = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
+  const existingId = await findExistingRowByAddress(formatted.address, tableId);
+  const payload = { values: formatted };
 
   try {
-    const existingRows = await axios.get(rowUrl, { headers });
-    const normalized = formatted.address.trim().toLowerCase();
-    const match = existingRows.data.results.find(
-      (row) => row.values?.address?.trim().toLowerCase() === normalized
-    );
-
-    const payload = { values: formatted };
-
-    if (match?.id) {
+    if (existingId) {
       try {
-        await axios.put(`${rowUrl}/${match.id}/draft`, {}, { headers });
-        await axios.patch(`${rowUrl}/${match.id}/draft`, payload, { headers });
+        await axios.put(`${rowUrl}/${existingId}/draft`, {}, { headers });
+        await axios.patch(`${rowUrl}/${existingId}/draft`, payload, { headers });
         console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
       } catch (err) {
         if ([400, 405].includes(err.response?.status)) {
-          await axios.delete(`${rowUrl}/${match.id}`, { headers });
+          await axios.delete(`${rowUrl}/${existingId}`, { headers });
           await axios.post(`${rowUrl}/draft`, payload, { headers });
-          console.log(`♻️ Recreated row (${tableId}): ${formatted.name}`);
+          console.log(`♻️ Recreated (${tableId}): ${formatted.name}`);
         } else {
           failedListings.push(formatted.name);
-          console.error(`❌ Update failed for ${formatted.name}`);
         }
       }
     } else {
@@ -169,7 +183,6 @@ async function upsertHubDBRow(listing, tableId) {
 }
 
 async function pushLiveChanges(tableId) {
-  if (!tableId) return;
   try {
     await axios.post(
       `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/draft/push-live`,
