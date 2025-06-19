@@ -34,10 +34,10 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^\x20-\x7E]/g, "") // Remove non-printable ASCII characters
-    .replace(/[\s\/\\]+/g, "-") // Replace spaces and slashes with hyphens
-    .replace(/[^a-z0-9-]/g, "") // Remove non-alphanumeric characters (except hyphen)
-    .replace(/--+/g, "-") // Replace multiple hyphens with a single one
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[\s\/\\]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/--+/g, "-")
     .trim();
 }
 
@@ -102,8 +102,8 @@ async function fetchAppFolioData() {
         l.visibility?.toLowerCase() === "active"
     );
 
-    const internetListings = activeListings.filter(
-      (l) => l.posted_to_internet?.toLowerCase() === "yes"
+    const internetListings = activeListings.filter((l) =>
+      ["yes", "y", "true"].includes((l.posted_to_internet || "").toLowerCase())
     );
 
     console.log("🧪 Listing keys example:", Object.keys(rawListings[0] || {}));
@@ -146,7 +146,7 @@ async function findExistingRowByAddress(address, tableId) {
   }
 }
 
-async function upsertHubDBRow(listing, tableId) {
+async function upsertHubDBRow(listing, tableId, isPublic = false) {
   const formatted = formatRow(listing);
   const address = formatted.address;
   const headers = {
@@ -156,6 +156,10 @@ async function upsertHubDBRow(listing, tableId) {
   const rowUrl = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
   const existingRowId = await findExistingRowByAddress(address, tableId);
   const payload = { values: formatted };
+
+  if (isPublic) {
+    console.log(`📤 Syncing to public table: ${formatted.name}`);
+  }
 
   try {
     if (existingRowId) {
@@ -173,8 +177,9 @@ async function upsertHubDBRow(listing, tableId) {
         }
       }
     } else {
-      await axios.post(`${rowUrl}/draft`, payload, { headers });
+      const response = await axios.post(`${rowUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
+      console.log("📝 HubSpot response (new row):", response.status, response.statusText);
     }
   } catch (error) {
     const status = error.response?.status;
@@ -191,7 +196,7 @@ async function pushLiveChanges(tableId) {
       Authorization: `Bearer ${HUBSPOT_API_KEY}`,
       "Content-Type": "application/json",
     };
-    const response = await axios.post(
+    await axios.post(
       `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/draft/push-live`,
       {},
       { headers }
@@ -216,7 +221,11 @@ async function pushLiveChanges(tableId) {
   }
 
   for (const listing of internetListings) {
-    await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
+    if (!listing.marketing_title || !listing.marketing_description) {
+      console.warn(`⛔ Skipping public row: ${listing.unit_address} — missing title or description.`);
+      continue;
+    }
+    await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC, true);
   }
 
   await pushLiveChanges(HUBDB_TABLE_ID);
