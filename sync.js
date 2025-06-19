@@ -1,14 +1,16 @@
 const axios = require("axios");
-require("dotenv").config(); // load .env variables
+require("dotenv").config(); // Load .env variables
 
 const APPFOLIO_CLIENT_ID = process.env.APPFOLIO_CLIENT_ID;
 const APPFOLIO_CLIENT_SECRET = process.env.APPFOLIO_CLIENT_SECRET;
 const HUBSPOT_API_KEY = process.env.HUBSPOT_API_KEY;
-const HUBDB_TABLE_ID_INTERNAL = process.env.HUBDB_TABLE_ID; // full table (existing)
-const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC; // filtered table (new)
+const HUBDB_TABLE_ID_INTERNAL = process.env.HUBDB_TABLE_ID; // full/internal listings
+const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC; // public listings
 
-console.log("🔑 Full HUBSPOT_API_KEY:", HUBSPOT_API_KEY);
+console.log("🔑 HUBSPOT_API_KEY:", !!HUBSPOT_API_KEY);
 console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
+console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID_INTERNAL);
+console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
 
 const APPFOLIO_URL = `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`;
 
@@ -24,9 +26,7 @@ function generateSlug(listing) {
 
 function autoGenerateMeta(description, city) {
   if (!description && !city) return "";
-  return `Discover this rental in ${city || "California"} — ${
-    description?.slice(0, 100) || ""
-  }...`;
+  return `Discover this rental in ${city || "California"} — ${description?.slice(0, 100) || ""}...`;
 }
 
 function formatRow(listing) {
@@ -46,31 +46,20 @@ function formatRow(listing) {
     description: listing.marketing_description || "",
     title: listing.marketing_title || "",
     youtube_url: listing.you_tube_url || "",
-    application_fee: listing.application_fee
-      ? parseFloat(listing.application_fee)
-      : null,
+    application_fee: listing.application_fee ? parseFloat(listing.application_fee) : null,
     amenities: listing.unit_amenities || "",
     appliances: listing.unit_appliances || "",
     billed_as: listing.billed_as || "",
-    meta_description: autoGenerateMeta(
-      listing.marketing_description,
-      listing.unit_city
-    ),
+    meta_description: autoGenerateMeta(listing.marketing_description, listing.unit_city),
   };
 }
 
 async function fetchAppFolioData() {
   try {
-    const response = await axios.post(APPFOLIO_URL, {
-      unit_visibility: "active",
-    });
+    const response = await axios.post(APPFOLIO_URL, { unit_visibility: "active" });
     return response.data.results || [];
   } catch (error) {
-    console.error(
-      "❌ AppFolio fetch error:",
-      error.response?.status,
-      error.response?.data || error.message
-    );
+    console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
     return [];
   }
 }
@@ -85,23 +74,7 @@ async function findExistingRowByAddress(address, tableId) {
       },
     });
 
-    if (response.data.results?.[0]) {
-      console.log(
-        `📋 HubDB (${tableId}) column names:`,
-        Object.keys(response.data.results[0].values)
-      );
-    }
-
-    const match = response.data.results.find(
-      (row) => row.values && row.values.address === address
-    );
-
-    if (match) {
-      console.log(`🧠 Found existing row in ${tableId} for ${address}: ID ${match.id}`);
-    } else {
-      console.log(`❌ No match found in ${tableId} for address: ${address}`);
-    }
-
+    const match = response.data.results.find(row => row.values?.address === address);
     return match?.id || null;
   } catch (error) {
     console.error(`❌ Error searching HubDB table (${tableId}):`, error.message);
@@ -109,10 +82,15 @@ async function findExistingRowByAddress(address, tableId) {
   }
 }
 
-async function upsertHubDBRow(listing) {
+async function upsertHubDBRow(listing, tableId) {
+  if (!tableId) {
+    console.error(`❌ Sync error for ${listing.unit_address}: HUBDB_TABLE_ID is not defined`);
+    return;
+  }
+
   const formatted = formatRow(listing);
   const address = formatted.address;
-  const existingRowId = await findExistingRowByAddress(address);
+  const existingRowId = await findExistingRowByAddress(address, tableId);
   const payload = { values: formatted };
 
   try {
@@ -123,44 +101,43 @@ async function upsertHubDBRow(listing) {
 
     if (existingRowId) {
       await axios.patch(
-        `https://api.hubapi.com/cms/v3/hubdb/tables/${HUBDB_TABLE_ID}/rows/${existingRowId}/draft`,
+        `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/${existingRowId}/draft`,
         payload,
         { headers }
       );
-      console.log(`🔄 Updated: ${formatted.name}`);
+      console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
     } else {
       await axios.post(
-        `https://api.hubapi.com/cms/v3/hubdb/tables/${HUBDB_TABLE_ID}/rows/draft`,
+        `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
         payload,
         { headers }
       );
-      console.log(`✅ Created: ${formatted.name}`);
+      console.log(`✅ Created (${tableId}): ${formatted.name}`);
     }
   } catch (error) {
-    console.error(
-      `❌ Sync error for ${formatted.name}:`,
-      error.response?.data || error.message
-    );
+    console.error(`❌ Sync error for ${formatted.name} (${tableId}):`, error.response?.data || error.message);
   }
 }
 
-async function pushLiveChanges() {
+async function pushLiveChanges(tableId) {
+  if (!tableId) {
+    console.error("❌ pushLiveChanges failed: No tableId provided");
+    return;
+  }
+
   try {
     const headers = {
       Authorization: `Bearer ${HUBSPOT_API_KEY}`,
       "Content-Type": "application/json",
     };
     await axios.post(
-      `https://api.hubapi.com/cms/v3/hubdb/tables/${HUBDB_TABLE_ID}/draft/push-live`,
+      `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/draft/push-live`,
       {},
       { headers }
     );
-    console.log("🚀 Pushed draft rows live.");
+    console.log(`🚀 Pushed draft rows live for table ${tableId}`);
   } catch (error) {
-    console.error(
-      "❌ Failed to push live:",
-      error.response?.data || error.message
-    );
+    console.error(`❌ Failed to push live (${tableId}):`, error.response?.data || error.message);
   }
 }
 
@@ -176,16 +153,16 @@ async function pushLiveChanges() {
 
   console.log(`📦 Syncing ${listings.length} listings...`);
 
- for (const listing of listings) {
-  await upsertHubDBRow(listing, HUBDB_TABLE_ID_INTERNAL); // all units
+  for (const listing of listings) {
+    await upsertHubDBRow(listing, HUBDB_TABLE_ID_INTERNAL);
 
-  if (listing.posted_to_internet === "Yes") {
-    await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC); // only public ones
+    if (listing.posted_to_internet === "Yes") {
+      await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
+    }
   }
-}
 
-await pushLiveChanges(HUBDB_TABLE_ID_INTERNAL);
-await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
+  await pushLiveChanges(HUBDB_TABLE_ID_INTERNAL);
+  await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
 
   console.log("✅ Sync complete.");
 })();
