@@ -35,10 +35,10 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^     .replace(/[^\x20-\x7E]/g, "")
-    .replace(/[\s\/\\]+/g, "-")
-    .replace(/[^a-z0-9-]/g, "")
-    .replace(/--+/g, "-")
+    .replace(/[^\x20-\x7E]/g, "")          // Remove non-ASCII characters
+    .replace(/[\s\/\\]+/g, "-")            // Replace spaces and slashes with dashes
+    .replace(/[^a-z0-9-]/g, "")            // Remove anything that's not a-z, 0-9, or dash
+    .replace(/--+/g, "-")                  // Collapse multiple dashes
     .trim();
 }
 
