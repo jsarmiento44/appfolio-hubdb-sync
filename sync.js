@@ -26,12 +26,14 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^�-~]/g, "")          // Remove non-printable ASCII characters
-    .replace(/[\s\/\\]+/g, "-")      // Replace spaces and slashes with hyphens
-    .replace(/[^a-z0-9-]/g, "")      // Remove non-alphanumeric characters (except hyphen)
-    .replace(/--+/g, "-")            // Replace multiple hyphens with a single one
+    .replace(/[^\x20-\x7E]/g, "")        // Remove non-printable ASCII characters (hex 20 to 7E)
+    .replace(/[\s\/\\]+/g, "-")          // Replace spaces and slashes with hyphens
+    .replace(/[^a-z0-9-]/g, "")          // Remove non-alphanumeric characters (except hyphen)
+    .replace(/--+/g, "-")                // Replace multiple hyphens with a single one
+    .replace(/^-+|-+$/g, "")             // Trim leading/trailing hyphens
     .trim();
 }
+
 
 function autoGenerateMeta(description, city) {
   if (!description && !city) return "";
