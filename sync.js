@@ -56,14 +56,20 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
+    // Manually encode the credentials as base64
+    const credentials = Buffer.from(
+      `${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}`
+    ).toString("base64");
+
+    // Create headers with Authorization
+    const headers = {
+      Authorization: `Basic ${credentials}`,
+    };
+
+    // Make the GET request with custom headers
     const response = await axios.get(
       "https://coastlineequity.appfolio.com/api/v2/reports/unit_directory.json",
-      {
-        auth: {
-          username: APPFOLIO_CLIENT_ID,
-          password: APPFOLIO_CLIENT_SECRET,
-        },
-      }
+      { headers }
     );
 
     const rawListings = response.data.results || [];
