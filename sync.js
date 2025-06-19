@@ -178,7 +178,12 @@ async function upsertHubDBRow(listing, tableId) {
     }
   } catch (err) {
     failedListings.push(formatted.name);
-    console.error(`❌ Final error syncing ${formatted.name}:`, err.response?.status);
+    console.error(`❌ Final error syncing ${formatted.name} – Status: ${err.response?.status}`);
+console.error(`🔍 Error Message:`, err.response?.data || err.message);
+console.log(`📄 Payload Attempted:`, JSON.stringify(payload, null, 2));
+console.log(`📍 Table ID: ${tableId}`);
+console.log(`📬 Endpoint: ${existingId ? `${rowUrl}/${existingId}/draft` : `${rowUrl}/draft`}`);
+
   }
 }
 
