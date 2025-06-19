@@ -27,7 +27,6 @@ console.log("🔑 HUBSPOT_API_KEY:", !!HUBSPOT_API_KEY);
 console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
 console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID);
 console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
-console.log("🔍 HUBDB_TABLE_ID_PUBLIC =", HUBDB_TABLE_ID_PUBLIC);
 
 const APPFOLIO_URL = `https://${APPFOLIO_DOMAIN}.appfolio.com/api/v2/reports/unit_directory.json`;
 
@@ -63,8 +62,8 @@ function formatRow(listing) {
     bathrooms: listing.bathrooms ? parseFloat(listing.bathrooms) : null,
     rent: listing.advertised_rent ? parseFloat(listing.advertised_rent) : null,
     deposit: listing.default_deposit || null,
-    description: listing.marketing_description || "",
-    title: listing.marketing_title || "",
+    description: listing.marketing_description || "No description available",
+    title: listing.marketing_title || "Untitled Listing",
     youtube_url: listing.you_tube_url || "",
     application_fee: listing.application_fee
       ? parseFloat(listing.application_fee)
@@ -165,9 +164,33 @@ async function upsertHubDBRow(listing, tableId) {
 
   try {
     if (existingRowId) {
-      await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
-      await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
-      console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
+      try {
+        console.log(`✏️ PUT draft for row ${existingRowId}`);
+        await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
+
+        console.log(`✏️ PATCH draft for row ${existingRowId}`);
+        await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
+
+        console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
+      } catch (updateErr) {
+        const status = updateErr.response?.status;
+        console.error(`❗ PATCH failed (${tableId}): ${status}`);
+
+        if (status === 405 || status === 400) {
+          // fallback: delete and recreate
+          try {
+            await axios.delete(`${rowUrl}/${existingRowId}`, { headers });
+            console.log(`🗑️ Deleted row ${existingRowId}, retrying as new...`);
+            await axios.post(`${rowUrl}/draft`, payload, { headers });
+            console.log(`♻️ Recreated row (${tableId}): ${formatted.name}`);
+          } catch (fallbackErr) {
+            console.error(`💥 Fallback failed: ${fallbackErr.response?.status} - ${fallbackErr.response?.data?.message}`);
+            console.log("🪪 Listing debug dump:", JSON.stringify(formatted, null, 2));
+          }
+        } else {
+          throw updateErr;
+        }
+      }
     } else {
       await axios.post(`${rowUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
