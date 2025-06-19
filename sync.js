@@ -27,6 +27,7 @@ console.log("🔑 HUBSPOT_API_KEY:", !!HUBSPOT_API_KEY);
 console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
 console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID);
 console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
+console.log("🔍 HUBDB_TABLE_ID_PUBLIC =", HUBDB_TABLE_ID_PUBLIC);
 
 const APPFOLIO_URL = `https://${APPFOLIO_DOMAIN}.appfolio.com/api/v2/reports/unit_directory.json`;
 
@@ -103,7 +104,9 @@ async function fetchAppFolioData() {
     );
 
     const internetListings = activeListings.filter(
-      (l) => l.posted_to_internet?.toLowerCase() === "yes"
+      (l) =>
+        l.posted_to_internet?.toString().toLowerCase() === "yes" ||
+        l.posted_to_internet === true
     );
 
     console.log("🧪 Listing keys example:", Object.keys(rawListings[0] || {}));
@@ -113,9 +116,7 @@ async function fetchAppFolioData() {
     );
 
     console.log(`📦 Fetched ${activeListings.length} active listings`);
-    console.log(
-      `📦 Syncing ${internetListings.length} listings posted to internet...`
-    );
+    console.log(`📤 Syncing to PUBLIC table ${HUBDB_TABLE_ID_PUBLIC}: ${internetListings.length} listings`);
 
     return { activeListings, internetListings };
   } catch (error) {
@@ -164,7 +165,6 @@ async function upsertHubDBRow(listing, tableId) {
 
   try {
     if (existingRowId) {
-      // Always create a draft before patching
       await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
       await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
       console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
