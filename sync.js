@@ -181,17 +181,27 @@ async function pushLiveChanges(tableId) {
     console.log("⚠️ No listings found to sync.");
     return;
   }
-  console.log(`📦 Syncing ${listings.length} listings...`);
 
-  for (const listing of listings) {
-    await upsertHubDBRow(listing, HUBDB_TABLE_ID);
+  // Filter only listings that are marked "posted to internet"
+  const publicListings = listings.filter(
+    (listing) => listing.posted_to_internet === true
+  );
 
-    if (listing.posted_to_internet === "Yes") {
-      await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
-    }
+  console.log(`📦 Syncing ${publicListings.length} listings posted to internet...`);
+
+  for (const listing of publicListings) {
+    // Only sync public table (posted online listings)
+    await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
   }
 
-  await pushLiveChanges(HUBDB_TABLE_ID);
+  // Optional: If you still want to sync all listings to the internal table:
+  // for (const listing of listings) {
+  //   await upsertHubDBRow(listing, HUBDB_TABLE_ID);
+  // }
+
   await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
+  // await pushLiveChanges(HUBDB_TABLE_ID); // Only if internal table is used
+
   console.log("✅ Sync complete.");
 })();
+
