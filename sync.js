@@ -136,10 +136,11 @@ async function findExistingRowByAddress(address, tableId) {
   }
 }
 
+const failedListings = [];
+
 async function upsertHubDBRow(listing, tableId) {
   const formatted = formatRow(listing);
 
-  // Pre-skip if invalid data
   if (!formatted.title || formatted.rent === 0) {
     console.warn(`⚠️ Skipping: Missing title or rent = 0 – ${formatted.name}`);
     return;
@@ -178,6 +179,7 @@ async function upsertHubDBRow(listing, tableId) {
           } catch (fallbackErr) {
             console.error(`💥 Fallback failed (${formatted.name}): ${fallbackErr.response?.status}`);
             console.log("📄 Final payload:", JSON.stringify(payload.values, null, 2));
+            failedListings.push(formatted.name);
           }
         }
       }
@@ -190,6 +192,21 @@ async function upsertHubDBRow(listing, tableId) {
     const message = finalErr.response?.data?.message || finalErr.message;
     console.error(`❌ Final sync error (${formatted.name}) – ${status}: ${message}`);
     console.log("🪪 Full listing dump:", JSON.stringify(formatted, null, 2));
+
+    if ((status === 405 || status === 400) && existingRowId) {
+      try {
+        await axios.delete(`${rowUrl}/${existingRowId}`, { headers });
+        console.log(`🧹 Deleted row ${existingRowId} due to persistent 405`);
+        await axios.post(`${rowUrl}/draft`, payload, { headers });
+        console.log(`♻️ Recreated row (final fallback): ${formatted.name}`);
+      } catch (forceErr) {
+        console.error(`🛑 Fallback-recreate also failed:`, forceErr.response?.status);
+        console.log("❌ Failed row data:", JSON.stringify(payload.values, null, 2));
+        failedListings.push(formatted.name);
+      }
+    } else {
+      failedListings.push(formatted.name);
+    }
   }
 }
 
@@ -230,5 +247,10 @@ async function pushLiveChanges(tableId) {
 
   await pushLiveChanges(HUBDB_TABLE_ID);
   await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
+
   console.log("✅ Sync complete.");
+  if (failedListings.length) {
+    console.warn("❌ Listings that failed after all retries:");
+    failedListings.forEach((name) => console.warn(" -", name));
+  }
 })();
