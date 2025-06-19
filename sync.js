@@ -1,11 +1,11 @@
 const axios = require("axios");
-require("dotenv").config(); // Load .env variables
+require("dotenv").config();
 
 const APPFOLIO_CLIENT_ID = process.env.APPFOLIO_CLIENT_ID;
 const APPFOLIO_CLIENT_SECRET = process.env.APPFOLIO_CLIENT_SECRET;
 const HUBSPOT_API_KEY = process.env.HUBSPOT_API_KEY;
-const HUBDB_TABLE_ID_INTERNAL = process.env.HUBDB_TABLE_ID; // full/internal listings
-const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC; // public listings
+const HUBDB_TABLE_ID_INTERNAL = process.env.HUBDB_TABLE_ID;
+const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC;
 
 console.log("🔑 HUBSPOT_API_KEY:", !!HUBSPOT_API_KEY);
 console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
@@ -56,15 +56,8 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
-    const response = await axios.get(APPFOLIO_URL);
-    const rawListings = response.data.results || [];
-
-    const filteredListings = rawListings.filter(
-      (l) => l.unit_visibility === "active" || l.visibility === "Active"
-    );
-
-    console.log(`📦 Fetched ${filteredListings.length} active listings`);
-    return filteredListings;
+    const response = await axios.post(APPFOLIO_URL, { unit_visibility: "active" });
+    return response.data.results || [];
   } catch (error) {
     console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
     return [];
@@ -90,11 +83,6 @@ async function findExistingRowByAddress(address, tableId) {
 }
 
 async function upsertHubDBRow(listing, tableId) {
-  if (!tableId) {
-    console.error(`❌ Sync error for ${listing.unit_address}: HUBDB_TABLE_ID is not defined`);
-    return;
-  }
-
   const formatted = formatRow(listing);
   const address = formatted.address;
   const existingRowId = await findExistingRowByAddress(address, tableId);
@@ -127,11 +115,7 @@ async function upsertHubDBRow(listing, tableId) {
 }
 
 async function pushLiveChanges(tableId) {
-  if (!tableId) {
-    console.error("❌ pushLiveChanges failed: No tableId provided");
-    return;
-  }
-
+  if (!tableId) return;
   try {
     const headers = {
       Authorization: `Bearer ${HUBSPOT_API_KEY}`,
