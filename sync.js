@@ -48,8 +48,13 @@ function autoGenerateMeta(description, city) {
     ((description || "").slice(0, 100)) + "...";
 }
 
-function formatRow(listing) {
-  return {
+function isInternetPosted(listing) {
+  const p = listing.posted_to_internet;
+  return (typeof p === "string" && p.toLowerCase() === "yes") || p === true;
+}
+
+function formatRow(listing, includeInternetFlag) {
+  const row = {
     name: listing.unit_address || listing.unit_name || "Untitled Listing",
     slug: generateSlug(listing),
     property_name: listing.property_name || "",
@@ -72,6 +77,12 @@ function formatRow(listing) {
     billed_as: listing.billed_as || "",
     meta_description: autoGenerateMeta(listing.marketing_description, listing.unit_city),
   };
+
+  if (includeInternetFlag) {
+    row.posted_to_internet = isInternetPosted(listing) ? "yes" : "no";
+  }
+
+  return row;
 }
 
 async function fetchAppFolioData() {
@@ -95,10 +106,7 @@ async function fetchAppFolioData() {
         (l.visibility && l.visibility.toLowerCase() === "active");
     });
 
-    const internetListings = activeListings.filter(function (l) {
-      const p = l.posted_to_internet;
-      return (typeof p === "string" && p.toLowerCase() === "yes") || p === true;
-    });
+    const internetListings = activeListings.filter(isInternetPosted);
 
     console.log("🧪 Sample fields:", rawListings[0] ? Object.keys(rawListings[0]) : []);
     console.log("📦 Active listings:", activeListings.length);
@@ -140,14 +148,14 @@ async function findExistingRowByAddress(address, tableId) {
 }
 
 async function upsertHubDBRow(listing, tableId) {
-  const formatted = formatRow(listing);
+  const isPublicTable = tableId === HUBDB_TABLE_ID_PUBLIC;
+  const formatted = formatRow(listing, !isPublicTable); // 👈 Add 'posted_to_internet' only for internal table
 
   if (!formatted.title || formatted.rent === 0) {
     console.warn("⚠️ Skipping: Missing title or rent = 0 – " + formatted.name);
     return;
   }
 
-  const isPublicTable = tableId === HUBDB_TABLE_ID_PUBLIC;
   const label = isPublicTable ? "🌐 PUBLIC" : "🏠 INTERNAL";
 
   const headers = {
