@@ -3,8 +3,6 @@ require("dotenv").config();
 
 const APPFOLIO_CLIENT_ID = process.env.APPFOLIO_CLIENT_ID;
 const APPFOLIO_CLIENT_SECRET = process.env.APPFOLIO_CLIENT_SECRET;
-const APPFOLIO_SUBDOMAIN = process.env.APPFOLIO_SUBDOMAIN || "coastlineequity";
-
 const HUBSPOT_API_KEY = process.env.HUBSPOT_API_KEY;
 const HUBDB_TABLE_ID_INTERNAL = process.env.HUBDB_TABLE_ID;
 const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC;
@@ -14,7 +12,7 @@ console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
 console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID_INTERNAL);
 console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
 
-const APPFOLIO_URL = `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@${APPFOLIO_SUBDOMAIN}.appfolio.com/api/v2/reports/unit_directory.json`;
+const APPFOLIO_URL = `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`;
 
 function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
@@ -60,11 +58,9 @@ async function fetchAppFolioData() {
   try {
     const response = await axios.post(
       APPFOLIO_URL,
-      {}, // <-- still needs a body, even if empty
+      {},
       {
-        headers: {
-          "Content-Type": "application/json", // ✅ REQUIRED
-        },
+        headers: { "Content-Type": "application/json" },
       }
     );
 
@@ -87,7 +83,6 @@ async function fetchAppFolioData() {
     return [];
   }
 }
-
 
 async function findExistingRowByAddress(address, tableId) {
   const url = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
