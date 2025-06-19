@@ -58,7 +58,16 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
-    const response = await axios.post(APPFOLIO_URL); // ✅ Must be POST
+    const response = await axios.post(
+      APPFOLIO_URL,
+      {}, // <-- still needs a body, even if empty
+      {
+        headers: {
+          "Content-Type": "application/json", // ✅ REQUIRED
+        },
+      }
+    );
+
     const rawListings = response.data.results || [];
 
     const filteredListings = rawListings.filter(
@@ -78,6 +87,7 @@ async function fetchAppFolioData() {
     return [];
   }
 }
+
 
 async function findExistingRowByAddress(address, tableId) {
   const url = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
