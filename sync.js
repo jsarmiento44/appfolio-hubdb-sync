@@ -12,8 +12,6 @@ console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
 console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID_INTERNAL);
 console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
 
-const APPFOLIO_URL = `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`;
-
 function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
@@ -56,17 +54,14 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
-    // Manually encode the credentials as base64
     const credentials = Buffer.from(
       `${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}`
     ).toString("base64");
 
-    // Create headers with Authorization
     const headers = {
       Authorization: `Basic ${credentials}`,
     };
 
-    // Make the GET request with custom headers
     const response = await axios.get(
       "https://coastlineequity.appfolio.com/api/v2/reports/unit_directory.json",
       { headers }
@@ -91,7 +86,6 @@ async function fetchAppFolioData() {
     return [];
   }
 }
-
 
 async function findExistingRowByAddress(address, tableId) {
   const url = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
