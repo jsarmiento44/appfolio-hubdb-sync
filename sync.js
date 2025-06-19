@@ -1,4 +1,3 @@
-// sync.js
 const axios = require("axios");
 require("dotenv").config();
 
@@ -9,10 +8,9 @@ const {
   APPFOLIO_DOMAIN,
   HUBSPOT_API_KEY,
   HUBDB_TABLE_ID,
-  HUBDB_TABLE_ID_PUBLIC
+  HUBDB_TABLE_ID_PUBLIC,
 } = process.env;
 
-// Validate required environment variables
 if (!APPFOLIO_CLIENT_ID || !APPFOLIO_CLIENT_SECRET || !APPFOLIO_DOMAIN || !HUBSPOT_API_KEY || !HUBDB_TABLE_ID || !HUBDB_TABLE_ID_PUBLIC) {
   console.error("❌ Missing required environment variables.");
   process.exit(1);
@@ -29,11 +27,10 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^\x20-\x7E]/g, "")        // Remove non-printable ASCII characters
-    .replace(/[\s\/\\]+/g, "-")          // Replace spaces and slashes with hyphens
-    .replace(/[^a-z0-9-]/g, "")          // Remove non-alphanumeric characters
-    .replace(/--+/g, "-")                // Collapse multiple hyphens
-    .replace(/^-+|-+$/g, "")             // Trim leading/trailing hyphens
+    .replace(/[^\x20-\x7E]/g, "")          // Remove non-printable ASCII characters
+    .replace(/[\s\/\\]+/g, "-")           // Replace spaces and slashes with hyphens
+    .replace(/[^a-z0-9-]/g, "")           // Remove non-alphanumeric characters (except hyphen)
+    .replace(/--+/g, "-")                 // Replace multiple hyphens with a single one
     .trim();
 }
 
@@ -117,53 +114,27 @@ async function findExistingRowByAddress(address, tableId) {
 async function upsertHubDBRow(listing, tableId) {
   const formatted = formatRow(listing);
   const address = formatted.address;
+  const existingRowId = await findExistingRowByAddress(address, tableId);
+  const payload = { values: formatted };
   const headers = {
     Authorization: `Bearer ${HUBSPOT_API_KEY}`,
     "Content-Type": "application/json",
   };
+  const draftBaseUrl = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
 
   try {
-    const existingRowId = await findExistingRowByAddress(address, tableId);
-    const payload = { values: formatted };
-
     if (existingRowId) {
-      try {
-        await axios.patch(
-          `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/${existingRowId}/draft`,
-          payload,
-          { headers }
-        );
-        console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
-      } catch (err) {
-        if (err.response?.status === 405) {
-          console.warn(`⚠️ PATCH 405 for ${formatted.name}, retrying with POST...`);
-          await axios.post(
-            `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
-            payload,
-            { headers }
-          );
-          console.log(`✅ POST fallback created (${tableId}): ${formatted.name}`);
-        } else {
-          throw err;
-        }
-      }
+      await axios.patch(`${draftBaseUrl}/${existingRowId}/draft`, payload, { headers });
+      console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
     } else {
-      await axios.post(
-        `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
-        payload,
-        { headers }
-      );
+      await axios.post(`${draftBaseUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
     }
   } catch (error) {
-    console.error(
-      `❌ Sync error for ${formatted.name} (${tableId}):`,
-      error.response?.data || error.message
-    );
+    console.error(`❌ Sync error for ${formatted.name} (${tableId}):`, error.response?.data || error.message);
     console.log("🪪 Listing debug dump:", JSON.stringify(formatted, null, 2));
   }
 }
-
 
 async function pushLiveChanges(tableId) {
   if (!tableId) return;
@@ -183,17 +154,14 @@ async function pushLiveChanges(tableId) {
   }
 }
 
-// Main execution
 (async function syncListings() {
   console.log("🚀 Starting sync script...");
   console.log("🔁 Fetching from AppFolio...");
   const listings = await fetchAppFolioData();
-
   if (!listings.length) {
     console.log("⚠️ No listings found to sync.");
     return;
   }
-
   console.log(`📦 Syncing ${listings.length} listings...`);
 
   for (const listing of listings) {
@@ -206,6 +174,5 @@ async function pushLiveChanges(tableId) {
 
   await pushLiveChanges(HUBDB_TABLE_ID);
   await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
-
   console.log("✅ Sync complete.");
 })();
