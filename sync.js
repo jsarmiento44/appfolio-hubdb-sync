@@ -113,7 +113,9 @@ async function fetchAppFolioData() {
     );
 
     console.log(`📦 Fetched ${activeListings.length} active listings`);
-    console.log(`📦 Syncing ${internetListings.length} listings posted to internet...`);
+    console.log(
+      `📦 Syncing ${internetListings.length} listings posted to internet...`
+    );
 
     return { activeListings, internetListings };
   } catch (error) {
@@ -141,12 +143,15 @@ async function findExistingRowByAddress(address, tableId) {
     );
     return match?.id || null;
   } catch (error) {
-    console.error(`❌ Error searching HubDB table (${tableId}):`, error.message);
+    console.error(
+      `❌ Error searching HubDB table (${tableId}):`,
+      error.message
+    );
     return null;
   }
 }
 
-async function upsertHubDBRow(listing, tableId, isPublic = false) {
+async function upsertHubDBRow(listing, tableId) {
   const formatted = formatRow(listing);
   const address = formatted.address;
   const headers = {
@@ -159,19 +164,10 @@ async function upsertHubDBRow(listing, tableId, isPublic = false) {
 
   try {
     if (existingRowId) {
-      try {
-        await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
-        console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
-      } catch (patchErr) {
-        if (patchErr.response?.status === 405) {
-          console.warn(`⚠️ Draft patch blocked by 405 — creating draft for ${formatted.name}`);
-          await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
-          await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
-          console.log(`♻️ Updated after draft creation: ${formatted.name}`);
-        } else {
-          throw patchErr;
-        }
-      }
+      // Always create a draft before patching
+      await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
+      await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
+      console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
     } else {
       await axios.post(`${rowUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
@@ -198,7 +194,10 @@ async function pushLiveChanges(tableId) {
     );
     console.log(`🚀 Pushed draft rows live for table ${tableId}`);
   } catch (error) {
-    console.error(`❌ Failed to push live (${tableId}):`, error.response?.data || error.message);
+    console.error(
+      `❌ Failed to push live (${tableId}):`,
+      error.response?.data || error.message
+    );
   }
 }
 
@@ -216,11 +215,7 @@ async function pushLiveChanges(tableId) {
   }
 
   for (const listing of internetListings) {
-    if (!listing.marketing_title || !listing.marketing_description) {
-      console.warn(`⛔ Skipping public row: ${listing.unit_address} — missing title or description.`);
-      continue;
-    }
-    await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC, true);
+    await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
   }
 
   await pushLiveChanges(HUBDB_TABLE_ID);
