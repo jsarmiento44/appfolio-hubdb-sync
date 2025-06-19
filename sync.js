@@ -5,12 +5,12 @@ const APPFOLIO_CLIENT_ID = process.env.APPFOLIO_CLIENT_ID;
 const APPFOLIO_CLIENT_SECRET = process.env.APPFOLIO_CLIENT_SECRET;
 const HUBSPOT_API_KEY = process.env.HUBSPOT_API_KEY;
 const HUBDB_TABLE_ID_INTERNAL = process.env.HUBDB_TABLE_ID;
+const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC;
 
 console.log("🔑 HUBSPOT_API_KEY:", !!HUBSPOT_API_KEY);
 console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
 console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID_INTERNAL);
-
-const APPFOLIO_URL = `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`;
+console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
 
 function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
@@ -54,11 +54,15 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
-    const response = await axios.get(APPFOLIO_URL, {
-      headers: {
-        "Content-Type": "application/json"
+    const response = await axios.post(
+      `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`,
+      {}, // Required empty body for POST
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
       }
-    });
+    );
 
     const rawListings = response.data.results || [];
 
@@ -119,12 +123,31 @@ async function upsertHubDBRow(listing, tableId) {
       );
       console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
     } else {
-      await axios.post(
-        `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
-        payload,
-        { headers }
-      );
-      console.log(`✅ Created (${tableId}): ${formatted.name}`);
+      try {
+        await axios.post(
+          `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
+          payload,
+          { headers }
+        );
+        console.log(`✅ Created (${tableId}): ${formatted.name}`);
+      } catch (postError) {
+        if (postError.response?.status === 405) {
+          console.warn(`⚠️ POST failed with 405, retrying PATCH for ${formatted.name}`);
+          const fallbackRowId = await findExistingRowByAddress(address, tableId);
+          if (fallbackRowId) {
+            await axios.patch(
+              `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/${fallbackRowId}/draft`,
+              payload,
+              { headers }
+            );
+            console.log(`🔁 Fallback PATCH succeeded for ${formatted.name}`);
+          } else {
+            console.error(`❌ Could not find row to fallback PATCH for ${formatted.name}`);
+          }
+        } else {
+          throw postError;
+        }
+      }
     }
   } catch (error) {
     console.error(`❌ Sync error for ${formatted.name} (${tableId}):`, error.response?.data || error.message);
@@ -163,9 +186,14 @@ async function pushLiveChanges(tableId) {
 
   for (const listing of listings) {
     await upsertHubDBRow(listing, HUBDB_TABLE_ID_INTERNAL);
+
+    if (listing.posted_to_internet === "Yes") {
+      await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
+    }
   }
 
   await pushLiveChanges(HUBDB_TABLE_ID_INTERNAL);
+  await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
 
   console.log("✅ Sync complete.");
 })();
