@@ -1,7 +1,6 @@
 const axios = require("axios");
 require("dotenv").config();
 
-// Load environment variables
 const {
   APPFOLIO_CLIENT_ID,
   APPFOLIO_CLIENT_SECRET,
@@ -88,9 +87,7 @@ async function fetchAppFolioData() {
           username: APPFOLIO_CLIENT_ID,
           password: APPFOLIO_CLIENT_SECRET,
         },
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
       }
     );
 
@@ -108,22 +105,13 @@ async function fetchAppFolioData() {
         l.posted_to_internet === true
     );
 
-    console.log("🧪 Listing keys example:", Object.keys(rawListings[0] || {}));
-    console.log(
-      "🧪 Sample listing posted_to_internet value:",
-      rawListings[0]?.posted_to_internet
-    );
-
-    console.log(`📦 Fetched ${activeListings.length} active listings`);
-    console.log(`📤 Syncing to PUBLIC table ${HUBDB_TABLE_ID_PUBLIC}: ${internetListings.length} listings`);
+    console.log("🧪 Sample fields:", Object.keys(rawListings[0] || {}));
+    console.log(`📦 Active listings: ${activeListings.length}`);
+    console.log(`📤 Internet-posted listings: ${internetListings.length}`);
 
     return { activeListings, internetListings };
   } catch (error) {
-    console.error(
-      "❌ AppFolio fetch error:",
-      error.response?.status,
-      error.response?.data || error.message
-    );
+    console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
     return { activeListings: [], internetListings: [] };
   }
 }
@@ -143,23 +131,26 @@ async function findExistingRowByAddress(address, tableId) {
     );
     return match?.id || null;
   } catch (error) {
-    console.error(
-      `❌ Error searching HubDB table (${tableId}):`,
-      error.message
-    );
+    console.error(`❌ Error searching HubDB table (${tableId}):`, error.message);
     return null;
   }
 }
 
 async function upsertHubDBRow(listing, tableId) {
   const formatted = formatRow(listing);
-  const address = formatted.address;
+
+  // Pre-skip if invalid data
+  if (!formatted.title || formatted.rent === 0) {
+    console.warn(`⚠️ Skipping: Missing title or rent = 0 – ${formatted.name}`);
+    return;
+  }
+
   const headers = {
     Authorization: `Bearer ${HUBSPOT_API_KEY}`,
     "Content-Type": "application/json",
   };
   const rowUrl = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
-  const existingRowId = await findExistingRowByAddress(address, tableId);
+  const existingRowId = await findExistingRowByAddress(formatted.address, tableId);
   const payload = { values: formatted };
 
   try {
@@ -174,32 +165,31 @@ async function upsertHubDBRow(listing, tableId) {
         console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
       } catch (updateErr) {
         const status = updateErr.response?.status;
-        console.error(`❗ PATCH failed (${tableId}): ${status}`);
+        const body = updateErr.response?.data;
+        console.error(`❌ PATCH failed (${tableId}) – ${formatted.name}: ${status}`);
+        console.log("🔍 Full error:", JSON.stringify(body, null, 2));
 
         if (status === 405 || status === 400) {
-          // fallback: delete and recreate
           try {
             await axios.delete(`${rowUrl}/${existingRowId}`, { headers });
-            console.log(`🗑️ Deleted row ${existingRowId}, retrying as new...`);
+            console.log(`🗑️ Deleted row ${existingRowId}`);
             await axios.post(`${rowUrl}/draft`, payload, { headers });
             console.log(`♻️ Recreated row (${tableId}): ${formatted.name}`);
           } catch (fallbackErr) {
-            console.error(`💥 Fallback failed: ${fallbackErr.response?.status} - ${fallbackErr.response?.data?.message}`);
-            console.log("🪪 Listing debug dump:", JSON.stringify(formatted, null, 2));
+            console.error(`💥 Fallback failed (${formatted.name}): ${fallbackErr.response?.status}`);
+            console.log("📄 Final payload:", JSON.stringify(payload.values, null, 2));
           }
-        } else {
-          throw updateErr;
         }
       }
     } else {
       await axios.post(`${rowUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
     }
-  } catch (error) {
-    const status = error.response?.status;
-    const message = error.response?.data?.message || error.message;
-    console.error(`❌ Sync error for ${formatted.name} (${tableId}): ${status} - ${message}`);
-    console.log("🪪 Listing debug dump:", JSON.stringify(formatted, null, 2));
+  } catch (finalErr) {
+    const status = finalErr.response?.status;
+    const message = finalErr.response?.data?.message || finalErr.message;
+    console.error(`❌ Final sync error (${formatted.name}) – ${status}: ${message}`);
+    console.log("🪪 Full listing dump:", JSON.stringify(formatted, null, 2));
   }
 }
 
@@ -217,19 +207,16 @@ async function pushLiveChanges(tableId) {
     );
     console.log(`🚀 Pushed draft rows live for table ${tableId}`);
   } catch (error) {
-    console.error(
-      `❌ Failed to push live (${tableId}):`,
-      error.response?.data || error.message
-    );
+    console.error(`❌ Push live failed (${tableId}):`, error.response?.data || error.message);
   }
 }
 
 (async function syncListings() {
-  console.log("🚀 Starting sync script...");
+  console.log("🚀 Starting sync...");
   const { activeListings, internetListings } = await fetchAppFolioData();
 
   if (!activeListings.length) {
-    console.log("⚠️ No listings found to sync.");
+    console.log("⚠️ No active listings found.");
     return;
   }
 
