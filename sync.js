@@ -102,8 +102,8 @@ async function fetchAppFolioData() {
         l.visibility?.toLowerCase() === "active"
     );
 
-    const internetListings = activeListings.filter((l) =>
-      ["yes", "y", "true"].includes((l.posted_to_internet || "").toLowerCase())
+    const internetListings = activeListings.filter(
+      (l) => l.posted_to_internet?.toLowerCase() === "yes"
     );
 
     console.log("🧪 Listing keys example:", Object.keys(rawListings[0] || {}));
@@ -157,10 +157,6 @@ async function upsertHubDBRow(listing, tableId, isPublic = false) {
   const existingRowId = await findExistingRowByAddress(address, tableId);
   const payload = { values: formatted };
 
-  if (isPublic) {
-    console.log(`📤 Syncing to public table: ${formatted.name}`);
-  }
-
   try {
     if (existingRowId) {
       try {
@@ -168,7 +164,7 @@ async function upsertHubDBRow(listing, tableId, isPublic = false) {
         console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
       } catch (patchErr) {
         if (patchErr.response?.status === 405) {
-          console.warn(`⚠️ Draft patch blocked by 405 — attempting to create draft for ${formatted.name}`);
+          console.warn(`⚠️ Draft patch blocked by 405 — creating draft for ${formatted.name}`);
           await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
           await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
           console.log(`♻️ Updated after draft creation: ${formatted.name}`);
@@ -177,9 +173,8 @@ async function upsertHubDBRow(listing, tableId, isPublic = false) {
         }
       }
     } else {
-      const response = await axios.post(`${rowUrl}/draft`, payload, { headers });
+      await axios.post(`${rowUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
-      console.log("📝 HubSpot response (new row):", response.status, response.statusText);
     }
   } catch (error) {
     const status = error.response?.status;
