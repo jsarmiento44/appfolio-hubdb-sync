@@ -35,7 +35,7 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^     .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[^     .replace(/[^\x20-~    .replace(/[^\x20-\x7E]/g, "")
     .replace(/[\s\/\\]+/g, "-")
     .replace(/[^a-z0-9-]/g, "")
     .replace(/--+/g, "-")
@@ -118,7 +118,74 @@ async function fetchAppFolioData() {
   }
 }
 
-// (unchanged logic for upsertHubDBRow and pushLiveChanges here)
+const failedListings = [];
+
+async function upsertHubDBRow(listing, tableId) {
+  const formatted = formatRow(listing);
+
+  if (!formatted.title || formatted.rent === 0) {
+    console.warn(`⚠️ Skipping: Missing title or rent = 0 – ${formatted.name}`);
+    return;
+  }
+
+  const headers = {
+    Authorization: `Bearer ${HUBSPOT_API_KEY}`,
+    "Content-Type": "application/json",
+  };
+  const rowUrl = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
+
+  try {
+    const existingRows = await axios.get(rowUrl, { headers });
+    const normalized = formatted.address.trim().toLowerCase();
+    const match = existingRows.data.results.find(
+      (row) => row.values?.address?.trim().toLowerCase() === normalized
+    );
+
+    const payload = { values: formatted };
+
+    if (match?.id) {
+      try {
+        await axios.put(`${rowUrl}/${match.id}/draft`, {}, { headers });
+        await axios.patch(`${rowUrl}/${match.id}/draft`, payload, { headers });
+        console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
+      } catch (err) {
+        if ([400, 405].includes(err.response?.status)) {
+          await axios.delete(`${rowUrl}/${match.id}`, { headers });
+          await axios.post(`${rowUrl}/draft`, payload, { headers });
+          console.log(`♻️ Recreated row (${tableId}): ${formatted.name}`);
+        } else {
+          failedListings.push(formatted.name);
+          console.error(`❌ Update failed for ${formatted.name}`);
+        }
+      }
+    } else {
+      await axios.post(`${rowUrl}/draft`, payload, { headers });
+      console.log(`✅ Created (${tableId}): ${formatted.name}`);
+    }
+  } catch (err) {
+    failedListings.push(formatted.name);
+    console.error(`❌ Final error syncing ${formatted.name}:`, err.response?.status);
+  }
+}
+
+async function pushLiveChanges(tableId) {
+  if (!tableId) return;
+  try {
+    await axios.post(
+      `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/draft/push-live`,
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${HUBSPOT_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    console.log(`🚀 Pushed draft rows live for table ${tableId}`);
+  } catch (error) {
+    console.error(`❌ Push live failed (${tableId}):`, error.response?.data || error.message);
+  }
+}
 
 (async function syncListings() {
   console.log("🚀 Starting sync...");
