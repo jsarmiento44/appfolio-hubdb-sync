@@ -12,6 +12,9 @@ console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
 console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID_INTERNAL);
 console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
 
+// AppFolio URL using axios "auth" config instead of inline credentials
+const APPFOLIO_URL = `https://coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`;
+
 function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
@@ -24,7 +27,9 @@ function generateSlug(listing) {
 
 function autoGenerateMeta(description, city) {
   if (!description && !city) return "";
-  return `Discover this rental in ${city || "California"} — ${description?.slice(0, 100) || ""}...`;
+  return `Discover this rental in ${city || "California"} — ${
+    description?.slice(0, 100) || ""
+  }...`;
 }
 
 function formatRow(listing) {
@@ -44,33 +49,30 @@ function formatRow(listing) {
     description: listing.marketing_description || "",
     title: listing.marketing_title || "",
     youtube_url: listing.you_tube_url || "",
-    application_fee: listing.application_fee ? parseFloat(listing.application_fee) : null,
+    application_fee: listing.application_fee
+      ? parseFloat(listing.application_fee)
+      : null,
     amenities: listing.unit_amenities || "",
     appliances: listing.unit_appliances || "",
     billed_as: listing.billed_as || "",
-    meta_description: autoGenerateMeta(listing.marketing_description, listing.unit_city),
+    utilities: listing.unit_utilities || "",
+    meta_description: autoGenerateMeta(
+      listing.marketing_description,
+      listing.unit_city
+    ),
   };
 }
 
 async function fetchAppFolioData() {
   try {
-    const credentials = Buffer.from(
-      `${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}`
-    ).toString("base64");
-
-    const headers = {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/json",
-    };
-
-    const response = await axios.post(
-      "https://coastlineequity.appfolio.com/api/v2/reports/unit_directory.json",
-      { unit_visibility: "active" }, // 🧠 POST body
-      { headers }
-    );
+    const response = await axios.get(APPFOLIO_URL, {
+      auth: {
+        username: APPFOLIO_CLIENT_ID,
+        password: APPFOLIO_CLIENT_SECRET,
+      },
+    });
 
     const rawListings = response.data.results || [];
-
     const filteredListings = rawListings.filter(
       (l) =>
         l.unit_visibility?.toLowerCase() === "active" ||
@@ -89,21 +91,23 @@ async function fetchAppFolioData() {
   }
 }
 
-
-async function findExistingRowByAddress(address, tableId) {
+async function findExistingRowByAddressOrSlug(listing, tableId) {
   const url = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
-  try {
-    const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${HUBSPOT_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-    });
+  const headers = {
+    Authorization: `Bearer ${HUBSPOT_API_KEY}`,
+    "Content-Type": "application/json",
+  };
 
-    const normalized = address.trim().toLowerCase();
+  try {
+    const response = await axios.get(url, { headers });
+
+    const normalizedAddress = listing.address?.trim().toLowerCase();
+    const normalizedSlug = listing.slug;
 
     const match = response.data.results.find(
-      (row) => row.values?.address?.trim().toLowerCase() === normalized
+      (row) =>
+        row.values?.address?.trim().toLowerCase() === normalizedAddress ||
+        row.values?.slug === normalizedSlug
     );
 
     return match?.id || null;
@@ -115,14 +119,14 @@ async function findExistingRowByAddress(address, tableId) {
 
 async function upsertHubDBRow(listing, tableId) {
   const formatted = formatRow(listing);
-  const address = formatted.address;
-  const existingRowId = await findExistingRowByAddress(address, tableId);
   const payload = { values: formatted };
 
   const headers = {
     Authorization: `Bearer ${HUBSPOT_API_KEY}`,
     "Content-Type": "application/json",
   };
+
+  const existingRowId = await findExistingRowByAddressOrSlug(formatted, tableId);
 
   try {
     if (existingRowId) {
@@ -142,8 +146,13 @@ async function upsertHubDBRow(listing, tableId) {
         console.log(`✅ Created (${tableId}): ${formatted.name}`);
       } catch (postError) {
         if (postError.response?.status === 405) {
-          console.warn(`⚠️ POST failed with 405, retrying PATCH for ${formatted.name}`);
-          const fallbackRowId = await findExistingRowByAddress(address, tableId);
+          console.warn(
+            `⚠️ POST failed with 405, retrying PATCH for ${formatted.name}`
+          );
+          const fallbackRowId = await findExistingRowByAddressOrSlug(
+            formatted,
+            tableId
+          );
           if (fallbackRowId) {
             await axios.patch(
               `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/${fallbackRowId}/draft`,
@@ -152,7 +161,9 @@ async function upsertHubDBRow(listing, tableId) {
             );
             console.log(`🔁 Fallback PATCH succeeded for ${formatted.name}`);
           } else {
-            console.error(`❌ Could not find row to fallback PATCH for ${formatted.name}`);
+            console.error(
+              `❌ Could not find row to fallback PATCH for ${formatted.name}`
+            );
           }
         } else {
           throw postError;
@@ -160,7 +171,10 @@ async function upsertHubDBRow(listing, tableId) {
       }
     }
   } catch (error) {
-    console.error(`❌ Sync error for ${formatted.name} (${tableId}):`, error.response?.data || error.message);
+    console.error(
+      `❌ Sync error for ${formatted.name} (${tableId}):`,
+      error.response?.data || error.message
+    );
   }
 }
 
@@ -178,7 +192,10 @@ async function pushLiveChanges(tableId) {
     );
     console.log(`🚀 Pushed draft rows live for table ${tableId}`);
   } catch (error) {
-    console.error(`❌ Failed to push live (${tableId}):`, error.response?.data || error.message);
+    console.error(
+      `❌ Failed to push live (${tableId}):`,
+      error.response?.data || error.message
+    );
   }
 }
 
