@@ -2,23 +2,26 @@
 const axios = require("axios");
 require("dotenv").config();
 
-// Load env vars
-const APPFOLIO_CLIENT_ID = process.env.APPFOLIO_CLIENT_ID;
-const APPFOLIO_CLIENT_SECRET = process.env.APPFOLIO_CLIENT_SECRET;
-const APPFOLIO_DOMAIN = process.env.APPFOLIO_DOMAIN;
-const HUBSPOT_API_KEY = process.env.HUBSPOT_API_KEY;
-const HUBDB_TABLE_ID = process.env.HUBDB_TABLE_ID;
-const HUBDB_TABLE_ID_PUBLIC = process.env.HUBDB_TABLE_ID_PUBLIC;
+// Load environment variables
+const {
+  APPFOLIO_CLIENT_ID,
+  APPFOLIO_CLIENT_SECRET,
+  APPFOLIO_DOMAIN,
+  HUBSPOT_API_KEY,
+  HUBDB_TABLE_ID,
+  HUBDB_TABLE_ID_PUBLIC
+} = process.env;
 
+// Validate required environment variables
 if (!APPFOLIO_CLIENT_ID || !APPFOLIO_CLIENT_SECRET || !APPFOLIO_DOMAIN || !HUBSPOT_API_KEY || !HUBDB_TABLE_ID || !HUBDB_TABLE_ID_PUBLIC) {
-  console.error("\u274C Missing required environment variables.");
+  console.error("❌ Missing required environment variables.");
   process.exit(1);
 }
 
-console.log("\uD83D\uDD11 HUBSPOT_API_KEY:", !!HUBSPOT_API_KEY);
-console.log("\u2705 APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
-console.log("\uD83D\uDCE6 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID);
-console.log("\uD83D\uDCE6 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
+console.log("🔑 HUBSPOT_API_KEY:", !!HUBSPOT_API_KEY);
+console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
+console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID);
+console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
 
 const APPFOLIO_URL = `https://${APPFOLIO_DOMAIN}.appfolio.com/api/v2/reports/unit_directory.json`;
 
@@ -26,14 +29,13 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^\x20-\x7E]/g, "")        // Remove non-printable ASCII characters (hex 20 to 7E)
+    .replace(/[^\x20-\x7E]/g, "")        // Remove non-printable ASCII characters
     .replace(/[\s\/\\]+/g, "-")          // Replace spaces and slashes with hyphens
-    .replace(/[^a-z0-9-]/g, "")          // Remove non-alphanumeric characters (except hyphen)
-    .replace(/--+/g, "-")                // Replace multiple hyphens with a single one
+    .replace(/[^a-z0-9-]/g, "")          // Remove non-alphanumeric characters
+    .replace(/--+/g, "-")                // Collapse multiple hyphens
     .replace(/^-+|-+$/g, "")             // Trim leading/trailing hyphens
     .trim();
 }
-
 
 function autoGenerateMeta(description, city) {
   if (!description && !city) return "";
@@ -84,14 +86,10 @@ async function fetchAppFolioData() {
     const filteredListings = rawListings.filter(
       (l) => l.unit_visibility?.toLowerCase() === "active" || l.visibility?.toLowerCase() === "active"
     );
-    console.log(`\uD83D\uDCE6 Fetched ${filteredListings.length} active listings`);
+    console.log(`📦 Fetched ${filteredListings.length} active listings`);
     return filteredListings;
   } catch (error) {
-    console.error(
-      "\u274C AppFolio fetch error:",
-      error.response?.status,
-      error.response?.data || error.message
-    );
+    console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
     return [];
   }
 }
@@ -111,7 +109,7 @@ async function findExistingRowByAddress(address, tableId) {
     );
     return match?.id || null;
   } catch (error) {
-    console.error(`\u274C Error searching HubDB table (${tableId}):`, error.message);
+    console.error(`❌ Error searching HubDB table (${tableId}):`, error.message);
     return null;
   }
 }
@@ -134,18 +132,18 @@ async function upsertHubDBRow(listing, tableId) {
         payload,
         { headers }
       );
-      console.log(`\uD83D\uDD04 Updated (${tableId}): ${formatted.name}`);
+      console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
     } else {
       await axios.post(
         `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
         payload,
         { headers }
       );
-      console.log(`\u2705 Created (${tableId}): ${formatted.name}`);
+      console.log(`✅ Created (${tableId}): ${formatted.name}`);
     }
   } catch (error) {
     console.error(
-      `\u274C Sync error for ${formatted.name} (${tableId}):`,
+      `❌ Sync error for ${formatted.name} (${tableId}):`,
       error.response?.data || error.message
     );
   }
@@ -163,21 +161,24 @@ async function pushLiveChanges(tableId) {
       {},
       { headers }
     );
-    console.log(`\uD83D\uDE80 Pushed draft rows live for table ${tableId}`);
+    console.log(`🚀 Pushed draft rows live for table ${tableId}`);
   } catch (error) {
-    console.error(`\u274C Failed to push live (${tableId}):`, error.response?.data || error.message);
+    console.error(`❌ Failed to push live (${tableId}):`, error.response?.data || error.message);
   }
 }
 
+// Main execution
 (async function syncListings() {
-  console.log("\uD83D\uDE80 Starting sync script...");
-  console.log("\uD83D\uDD01 Fetching from AppFolio...");
+  console.log("🚀 Starting sync script...");
+  console.log("🔁 Fetching from AppFolio...");
   const listings = await fetchAppFolioData();
+
   if (!listings.length) {
-    console.log("\u26A0\uFE0F No listings found to sync.");
+    console.log("⚠️ No listings found to sync.");
     return;
   }
-  console.log(`\uD83D\uDCE6 Syncing ${listings.length} listings...`);
+
+  console.log(`📦 Syncing ${listings.length} listings...`);
 
   for (const listing of listings) {
     await upsertHubDBRow(listing, HUBDB_TABLE_ID);
@@ -189,5 +190,6 @@ async function pushLiveChanges(tableId) {
 
   await pushLiveChanges(HUBDB_TABLE_ID);
   await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
-  console.log("\u2705 Sync complete.");
+
+  console.log("✅ Sync complete.");
 })();
