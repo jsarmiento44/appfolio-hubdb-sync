@@ -11,7 +11,14 @@ const {
   HUBDB_TABLE_ID_PUBLIC,
 } = process.env;
 
-if (!APPFOLIO_CLIENT_ID || !APPFOLIO_CLIENT_SECRET || !APPFOLIO_DOMAIN || !HUBSPOT_API_KEY || !HUBDB_TABLE_ID || !HUBDB_TABLE_ID_PUBLIC) {
+if (
+  !APPFOLIO_CLIENT_ID ||
+  !APPFOLIO_CLIENT_SECRET ||
+  !APPFOLIO_DOMAIN ||
+  !HUBSPOT_API_KEY ||
+  !HUBDB_TABLE_ID ||
+  !HUBDB_TABLE_ID_PUBLIC
+) {
   console.error("❌ Missing required environment variables.");
   process.exit(1);
 }
@@ -27,16 +34,18 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^\x20-\x7E]/g, "")      // Remove non-printable ASCII
-    .replace(/[\s\/\\]+/g, "-")        // Replace spaces and slashes with hyphens
-    .replace(/[^a-z0-9-]/g, "")        // Remove non-alphanumeric except hyphens
-    .replace(/--+/g, "-")              // Collapse multiple hyphens
+    .replace(/[^\x20-\x7E]/g, "") // Remove non-printable ASCII characters
+    .replace(/[\s\/\\]+/g, "-") // Replace spaces and slashes with hyphens
+    .replace(/[^a-z0-9-]/g, "") // Remove non-alphanumeric characters (except hyphen)
+    .replace(/--+/g, "-") // Replace multiple hyphens with a single one
     .trim();
 }
 
 function autoGenerateMeta(description, city) {
   if (!description && !city) return "";
-  return `Discover this rental in ${city || "California"} — ${description?.slice(0, 100) || ""}...`;
+  return `Discover this rental in ${city || "California"} — ${
+    description?.slice(0, 100) || ""
+  }...`;
 }
 
 function formatRow(listing) {
@@ -56,11 +65,16 @@ function formatRow(listing) {
     description: listing.marketing_description || "",
     title: listing.marketing_title || "",
     youtube_url: listing.you_tube_url || "",
-    application_fee: listing.application_fee ? parseFloat(listing.application_fee) : null,
+    application_fee: listing.application_fee
+      ? parseFloat(listing.application_fee)
+      : null,
     amenities: listing.unit_amenities || "",
     appliances: listing.unit_appliances || "",
     billed_as: listing.billed_as || "",
-    meta_description: autoGenerateMeta(listing.marketing_description, listing.unit_city),
+    meta_description: autoGenerateMeta(
+      listing.marketing_description,
+      listing.unit_city
+    ),
   };
 }
 
@@ -79,15 +93,36 @@ async function fetchAppFolioData() {
         },
       }
     );
+
     const rawListings = response.data.results || [];
-    const filteredListings = rawListings.filter(
-      (l) => l.unit_visibility?.toLowerCase() === "active" || l.visibility?.toLowerCase() === "active"
+
+    const activeListings = rawListings.filter(
+      (l) =>
+        l.unit_visibility?.toLowerCase() === "active" ||
+        l.visibility?.toLowerCase() === "active"
     );
-    console.log(`📦 Fetched ${filteredListings.length} active listings`);
-    return filteredListings;
+
+    const internetListings = activeListings.filter(
+      (l) => l.posted_to_internet?.toLowerCase() === "yes"
+    );
+
+    console.log("🧪 Listing keys example:", Object.keys(rawListings[0] || {}));
+    console.log(
+      "🧪 Sample listing posted_to_internet value:",
+      rawListings[0]?.posted_to_internet
+    );
+
+    console.log(`📦 Fetched ${activeListings.length} active listings`);
+    console.log(`📦 Syncing ${internetListings.length} listings posted to internet...`);
+
+    return { activeListings, internetListings };
   } catch (error) {
-    console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
-    return [];
+    console.error(
+      "❌ AppFolio fetch error:",
+      error.response?.status,
+      error.response?.data || error.message
+    );
+    return { activeListings: [], internetListings: [] };
   }
 }
 
@@ -129,7 +164,7 @@ async function upsertHubDBRow(listing, tableId) {
         console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
       } catch (patchErr) {
         if (patchErr.response?.status === 405) {
-          console.warn(`⚠️ Draft patch blocked by 405 — creating draft first for ${formatted.name}`);
+          console.warn(`⚠️ Draft patch blocked by 405 — attempting to create draft for ${formatted.name}`);
           await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
           await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
           console.log(`♻️ Updated after draft creation: ${formatted.name}`);
@@ -156,7 +191,7 @@ async function pushLiveChanges(tableId) {
       Authorization: `Bearer ${HUBSPOT_API_KEY}`,
       "Content-Type": "application/json",
     };
-    await axios.post(
+    const response = await axios.post(
       `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/draft/push-live`,
       {},
       { headers }
@@ -169,30 +204,18 @@ async function pushLiveChanges(tableId) {
 
 (async function syncListings() {
   console.log("🚀 Starting sync script...");
-  console.log("🔁 Fetching from AppFolio...");
-  const listings = await fetchAppFolioData();
-  if (!listings.length) {
+  const { activeListings, internetListings } = await fetchAppFolioData();
+
+  if (!activeListings.length) {
     console.log("⚠️ No listings found to sync.");
     return;
   }
 
-  console.log("🧪 Listing keys example:", Object.keys(listings[0]));
-  console.log("🧪 Sample listing posted_to_internet value:", listings[0]?.posted_to_internet);
-  const publicListings = listings.filter((l) => l.posted_to_internet === "Yes");
-  console.log(`📦 Syncing ${publicListings.length} listings posted to internet...`);
-
-  for (const listing of publicListings) {
-    const isValidForSync =
-      listing.marketing_title?.trim() &&
-      listing.marketing_description?.trim() &&
-      parseFloat(listing.advertised_rent) > 0;
-
-    if (!isValidForSync) {
-      console.warn(`⚠️ Skipped listing due to missing data: ${listing.unit_address || listing.property_name}`);
-      continue;
-    }
-
+  for (const listing of activeListings) {
     await upsertHubDBRow(listing, HUBDB_TABLE_ID);
+  }
+
+  for (const listing of internetListings) {
     await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
   }
 
