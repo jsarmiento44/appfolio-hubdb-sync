@@ -60,15 +60,25 @@ async function fetchAppFolioData() {
 
     const headers = {
       Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/json",
     };
 
-    const response = await axios.get(
-      "https://coastlineequity.appfolio.com/api/v2/reports/",
+    const response = await axios.post(
+      "https://coastlineequity.appfolio.com/api/v2/reports/unit_directory.json",
+      { unit_visibility: "active" }, // 🧠 POST body
       { headers }
     );
 
-    console.log("✅ Available reports:", response.data);
-    return [];
+    const rawListings = response.data.results || [];
+
+    const filteredListings = rawListings.filter(
+      (l) =>
+        l.unit_visibility?.toLowerCase() === "active" ||
+        l.visibility?.toLowerCase() === "active"
+    );
+
+    console.log(`📦 Fetched ${filteredListings.length} active listings`);
+    return filteredListings;
   } catch (error) {
     console.error(
       "❌ AppFolio fetch error:",
@@ -78,6 +88,7 @@ async function fetchAppFolioData() {
     return [];
   }
 }
+
 
 async function findExistingRowByAddress(address, tableId) {
   const url = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
