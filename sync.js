@@ -1,7 +1,6 @@
 const axios = require("axios");
 require("dotenv").config();
 
-// Load environment variables
 const {
   APPFOLIO_CLIENT_ID,
   APPFOLIO_CLIENT_SECRET,
@@ -11,7 +10,14 @@ const {
   HUBDB_TABLE_ID_PUBLIC,
 } = process.env;
 
-if (!APPFOLIO_CLIENT_ID || !APPFOLIO_CLIENT_SECRET || !APPFOLIO_DOMAIN || !HUBSPOT_API_KEY || !HUBDB_TABLE_ID || !HUBDB_TABLE_ID_PUBLIC) {
+if (
+  !APPFOLIO_CLIENT_ID ||
+  !APPFOLIO_CLIENT_SECRET ||
+  !APPFOLIO_DOMAIN ||
+  !HUBSPOT_API_KEY ||
+  !HUBDB_TABLE_ID ||
+  !HUBDB_TABLE_ID_PUBLIC
+) {
   console.error("❌ Missing required environment variables.");
   process.exit(1);
 }
@@ -27,10 +33,10 @@ function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
     .toLowerCase()
-    .replace(/[^\x20-\x7E]/g, "")          // Remove non-printable ASCII characters
-    .replace(/[\s\/\\]+/g, "-")           // Replace spaces and slashes with hyphens
-    .replace(/[^a-z0-9-]/g, "")           // Remove non-alphanumeric characters (except hyphen)
-    .replace(/--+/g, "-")                 // Replace multiple hyphens with a single one
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[\s\/\\]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/--+/g, "-")
     .trim();
 }
 
@@ -80,11 +86,18 @@ async function fetchAppFolioData() {
       }
     );
     const rawListings = response.data.results || [];
-    const filteredListings = rawListings.filter(
-      (l) => l.unit_visibility?.toLowerCase() === "active" || l.visibility?.toLowerCase() === "active"
+
+    console.log("🧪 Listing keys example:", Object.keys(rawListings[0] || {}));
+    console.log("🧪 Sample listing posted_to_internet value:", rawListings[0]?.posted_to_internet);
+
+    const activeListings = rawListings.filter(
+      (l) =>
+        l.unit_visibility?.toLowerCase() === "active" ||
+        l.visibility?.toLowerCase() === "active"
     );
-    console.log(`📦 Fetched ${filteredListings.length} active listings`);
-    return filteredListings;
+
+    console.log(`📦 Fetched ${activeListings.length} active listings`);
+    return activeListings;
   } catch (error) {
     console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
     return [];
@@ -125,15 +138,12 @@ async function upsertHubDBRow(listing, tableId) {
   try {
     if (existingRowId) {
       try {
-        // Attempt PATCH to draft
         await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
         console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
       } catch (patchErr) {
         if (patchErr.response?.status === 405) {
-          console.warn(`⚠️ Draft patch blocked by 405 — attempting to create draft for ${formatted.name}`);
-          // Try to create a draft version first
+          console.warn(`⚠️ Draft patch blocked by 405 — creating draft for ${formatted.name}`);
           await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
-          // Now try the PATCH again
           await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
           console.log(`♻️ Updated after draft creation: ${formatted.name}`);
         } else {
@@ -141,7 +151,6 @@ async function upsertHubDBRow(listing, tableId) {
         }
       }
     } else {
-      // Create new draft row
       await axios.post(`${rowUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
     }
@@ -152,8 +161,6 @@ async function upsertHubDBRow(listing, tableId) {
     console.log("🪪 Listing debug dump:", JSON.stringify(formatted, null, 2));
   }
 }
-
-
 
 async function pushLiveChanges(tableId) {
   if (!tableId) return;
@@ -182,26 +189,24 @@ async function pushLiveChanges(tableId) {
     return;
   }
 
-  // Filter only listings that are marked "posted to internet"
-  const publicListings = listings.filter(
-    (listing) => listing.posted_to_internet === true
-  );
+  const postedListings = listings.filter((l) => {
+    const posted = l.posted_to_internet || l.PostedToInternet || l.posted || "";
+    return typeof posted === "string"
+      ? posted.toLowerCase() === "yes"
+      : posted === true;
+  });
 
-  console.log(`📦 Syncing ${publicListings.length} listings posted to internet...`);
+  console.log(`📦 Syncing ${postedListings.length} listings posted to internet...`);
 
-  for (const listing of publicListings) {
-    // Only sync public table (posted online listings)
+  for (const listing of listings) {
+    await upsertHubDBRow(listing, HUBDB_TABLE_ID);
+  }
+
+  for (const listing of postedListings) {
     await upsertHubDBRow(listing, HUBDB_TABLE_ID_PUBLIC);
   }
 
-  // Optional: If you still want to sync all listings to the internal table:
-  // for (const listing of listings) {
-  //   await upsertHubDBRow(listing, HUBDB_TABLE_ID);
-  // }
-
+  await pushLiveChanges(HUBDB_TABLE_ID);
   await pushLiveChanges(HUBDB_TABLE_ID_PUBLIC);
-  // await pushLiveChanges(HUBDB_TABLE_ID); // Only if internal table is used
-
   console.log("✅ Sync complete.");
 })();
-
