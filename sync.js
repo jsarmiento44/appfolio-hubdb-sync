@@ -75,8 +75,8 @@ async function fetchAppFolioData() {
   }
 }
 
-async function findExistingRowByAddress(address) {
-  const url = `https://api.hubapi.com/cms/v3/hubdb/tables/${HUBDB_TABLE_ID}/rows`;
+async function findExistingRowByAddress(address, tableId) {
+  const url = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
   try {
     const response = await axios.get(url, {
       headers: {
@@ -85,10 +85,9 @@ async function findExistingRowByAddress(address) {
       },
     });
 
-    // 🔍 Log column names for debug
     if (response.data.results?.[0]) {
       console.log(
-        "📋 HubDB column names:",
+        `📋 HubDB (${tableId}) column names:`,
         Object.keys(response.data.results[0].values)
       );
     }
@@ -98,14 +97,14 @@ async function findExistingRowByAddress(address) {
     );
 
     if (match) {
-      console.log(`🧠 Found existing row for ${address}: ID ${match.id}`);
+      console.log(`🧠 Found existing row in ${tableId} for ${address}: ID ${match.id}`);
     } else {
-      console.log(`❌ No match found for address: ${address}`);
+      console.log(`❌ No match found in ${tableId} for address: ${address}`);
     }
 
     return match?.id || null;
   } catch (error) {
-    console.error("❌ Error searching HubDB table:", error.message);
+    console.error(`❌ Error searching HubDB table (${tableId}):`, error.message);
     return null;
   }
 }
