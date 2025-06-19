@@ -56,8 +56,15 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
-    const response = await axios.post(APPFOLIO_URL, { unit_visibility: "active" });
-    return response.data.results || [];
+    const response = await axios.get(APPFOLIO_URL);
+    const rawListings = response.data.results || [];
+
+    const filteredListings = rawListings.filter(
+      (l) => l.unit_visibility === "active" || l.visibility === "Active"
+    );
+
+    console.log(`📦 Fetched ${filteredListings.length} active listings`);
+    return filteredListings;
   } catch (error) {
     console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
     return [];
