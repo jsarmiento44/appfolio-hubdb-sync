@@ -124,17 +124,26 @@ async function upsertHubDBRow(listing, tableId) {
 
   try {
     if (existingRowId) {
+      // Try PATCHing draft
       await axios.patch(`${draftBaseUrl}/${existingRowId}/draft`, payload, { headers });
       console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
     } else {
+      // Create new draft row
       await axios.post(`${draftBaseUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
     }
   } catch (error) {
-    console.error(`❌ Sync error for ${formatted.name} (${tableId}):`, error.response?.data || error.message);
+    const status = error.response?.status;
+    const data = error.response?.data;
+
+    console.error(`❌ Sync error for ${formatted.name} (${tableId}): ${status} - ${data?.message || data || error.message}`);
     console.log("🪪 Listing debug dump:", JSON.stringify(formatted, null, 2));
+
+    // Optional: fallback or deletion logic could go here
+    // e.g. DELETE and re-POST if status === 405
   }
 }
+
 
 async function pushLiveChanges(tableId) {
   if (!tableId) return;
