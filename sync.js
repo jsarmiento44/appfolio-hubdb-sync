@@ -56,8 +56,17 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
-    const response = await axios.post(APPFOLIO_URL, { unit_visibility: "active" });
-    return response.data.results || [];
+    const response = await axios.get(APPFOLIO_URL);
+    const rawListings = response.data.results || [];
+
+    const filteredListings = rawListings.filter(
+      (l) =>
+        l.unit_visibility?.toLowerCase() === "active" ||
+        l.visibility?.toLowerCase() === "active"
+    );
+
+    console.log(`📦 Fetched ${filteredListings.length} active listings`);
+    return filteredListings;
   } catch (error) {
     console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
     return [];
@@ -74,7 +83,12 @@ async function findExistingRowByAddress(address, tableId) {
       },
     });
 
-    const match = response.data.results.find(row => row.values?.address === address);
+    const normalized = address.trim().toLowerCase();
+
+    const match = response.data.results.find(
+      (row) => row.values?.address?.trim().toLowerCase() === normalized
+    );
+
     return match?.id || null;
   } catch (error) {
     console.error(`❌ Error searching HubDB table (${tableId}):`, error.message);
@@ -88,12 +102,12 @@ async function upsertHubDBRow(listing, tableId) {
   const existingRowId = await findExistingRowByAddress(address, tableId);
   const payload = { values: formatted };
 
-  try {
-    const headers = {
-      Authorization: `Bearer ${HUBSPOT_API_KEY}`,
-      "Content-Type": "application/json",
-    };
+  const headers = {
+    Authorization: `Bearer ${HUBSPOT_API_KEY}`,
+    "Content-Type": "application/json",
+  };
 
+  try {
     if (existingRowId) {
       await axios.patch(
         `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/${existingRowId}/draft`,
@@ -102,12 +116,31 @@ async function upsertHubDBRow(listing, tableId) {
       );
       console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
     } else {
-      await axios.post(
-        `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
-        payload,
-        { headers }
-      );
-      console.log(`✅ Created (${tableId}): ${formatted.name}`);
+      try {
+        await axios.post(
+          `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/draft`,
+          payload,
+          { headers }
+        );
+        console.log(`✅ Created (${tableId}): ${formatted.name}`);
+      } catch (postError) {
+        if (postError.response?.status === 405) {
+          console.warn(`⚠️ POST failed with 405, retrying PATCH for ${formatted.name}`);
+          const fallbackRowId = await findExistingRowByAddress(address, tableId);
+          if (fallbackRowId) {
+            await axios.patch(
+              `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows/${fallbackRowId}/draft`,
+              payload,
+              { headers }
+            );
+            console.log(`🔁 Fallback PATCH succeeded for ${formatted.name}`);
+          } else {
+            console.error(`❌ Could not find row to fallback PATCH for ${formatted.name}`);
+          }
+        } else {
+          throw postError;
+        }
+      }
     }
   } catch (error) {
     console.error(`❌ Sync error for ${formatted.name} (${tableId}):`, error.response?.data || error.message);
