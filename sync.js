@@ -12,6 +12,8 @@ console.log("✅ APPFOLIO_CLIENT_ID:", APPFOLIO_CLIENT_ID?.slice(0, 8));
 console.log("📦 HUBDB_TABLE_ID (Internal):", HUBDB_TABLE_ID_INTERNAL);
 console.log("📦 HUBDB_TABLE_ID_PUBLIC:", HUBDB_TABLE_ID_PUBLIC);
 
+const APPFOLIO_URL = `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`;
+
 function generateSlug(listing) {
   const base = listing.unit_address || listing.property_name || "untitled";
   return base
@@ -54,15 +56,11 @@ function formatRow(listing) {
 
 async function fetchAppFolioData() {
   try {
-    const response = await axios.post(
-      `https://${APPFOLIO_CLIENT_ID}:${APPFOLIO_CLIENT_SECRET}@coastlineequity.appfolio.com/api/v2/reports/unit_directory.json`,
-      {}, // Required empty body for POST
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
+    const response = await axios.get(APPFOLIO_URL, {
+      headers: {
+        "Content-Type": "application/json"
       }
-    );
+    });
 
     const rawListings = response.data.results || [];
 
@@ -75,7 +73,11 @@ async function fetchAppFolioData() {
     console.log(`📦 Fetched ${filteredListings.length} active listings`);
     return filteredListings;
   } catch (error) {
-    console.error("❌ AppFolio fetch error:", error.response?.status, error.response?.data || error.message);
+    console.error(
+      "❌ AppFolio fetch error:",
+      error.response?.status,
+      error.response?.data || error.message
+    );
     return [];
   }
 }
@@ -90,11 +92,20 @@ async function findExistingRowByAddress(address, tableId) {
       },
     });
 
-    const normalized = address.trim().toLowerCase();
+    const normalized = address.trim().toLowerCase().replace(/\s+/g, ' ');
 
-    const match = response.data.results.find(
-      (row) => row.values?.address?.trim().toLowerCase() === normalized
-    );
+    const match = response.data.results.find((row) => {
+      const rowAddress = (row.values?.address || "").trim().toLowerCase().replace(/\s+/g, ' ');
+      return rowAddress === normalized;
+    });
+
+    if (!match) {
+      console.warn(`⚠️ Address not found: "${normalized}"`);
+      console.log("🧪 Sample addresses in HubDB:");
+      response.data.results.slice(0, 5).forEach(row => {
+        console.log("—", row.values?.address || "[empty]");
+      });
+    }
 
     return match?.id || null;
   } catch (error) {
