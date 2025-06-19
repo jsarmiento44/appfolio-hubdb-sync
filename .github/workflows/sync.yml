@@ -26,6 +26,7 @@ jobs:
         env:
           APPFOLIO_CLIENT_ID: ${{ secrets.APPFOLIO_CLIENT_ID }}
           APPFOLIO_CLIENT_SECRET: ${{ secrets.APPFOLIO_CLIENT_SECRET }}
+          APPFOLIO_DOMAIN: ${{ secrets.APPFOLIO_DOMAIN }}
           HUBSPOT_API_KEY: ${{ secrets.HUBSPOT_API_KEY }}
           HUBDB_TABLE_ID: ${{ secrets.HUBDB_TABLE_ID }}
           HUBDB_TABLE_ID_PUBLIC: ${{ secrets.HUBDB_TABLE_ID_PUBLIC }}
