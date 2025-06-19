@@ -114,35 +114,45 @@ async function findExistingRowByAddress(address, tableId) {
 async function upsertHubDBRow(listing, tableId) {
   const formatted = formatRow(listing);
   const address = formatted.address;
-  const existingRowId = await findExistingRowByAddress(address, tableId);
-  const payload = { values: formatted };
   const headers = {
     Authorization: `Bearer ${HUBSPOT_API_KEY}`,
     "Content-Type": "application/json",
   };
-  const draftBaseUrl = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
+  const rowUrl = `https://api.hubapi.com/cms/v3/hubdb/tables/${tableId}/rows`;
+  const existingRowId = await findExistingRowByAddress(address, tableId);
+  const payload = { values: formatted };
 
   try {
     if (existingRowId) {
-      // Try PATCHing draft
-      await axios.patch(`${draftBaseUrl}/${existingRowId}/draft`, payload, { headers });
-      console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
+      try {
+        // Attempt PATCH to draft
+        await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
+        console.log(`🔄 Updated (${tableId}): ${formatted.name}`);
+      } catch (patchErr) {
+        if (patchErr.response?.status === 405) {
+          console.warn(`⚠️ Draft patch blocked by 405 — attempting to create draft for ${formatted.name}`);
+          // Try to create a draft version first
+          await axios.put(`${rowUrl}/${existingRowId}/draft`, {}, { headers });
+          // Now try the PATCH again
+          await axios.patch(`${rowUrl}/${existingRowId}/draft`, payload, { headers });
+          console.log(`♻️ Updated after draft creation: ${formatted.name}`);
+        } else {
+          throw patchErr;
+        }
+      }
     } else {
       // Create new draft row
-      await axios.post(`${draftBaseUrl}/draft`, payload, { headers });
+      await axios.post(`${rowUrl}/draft`, payload, { headers });
       console.log(`✅ Created (${tableId}): ${formatted.name}`);
     }
   } catch (error) {
     const status = error.response?.status;
-    const data = error.response?.data;
-
-    console.error(`❌ Sync error for ${formatted.name} (${tableId}): ${status} - ${data?.message || data || error.message}`);
+    const message = error.response?.data?.message || error.message;
+    console.error(`❌ Sync error for ${formatted.name} (${tableId}): ${status} - ${message}`);
     console.log("🪪 Listing debug dump:", JSON.stringify(formatted, null, 2));
-
-    // Optional: fallback or deletion logic could go here
-    // e.g. DELETE and re-POST if status === 405
   }
 }
+
 
 
 async function pushLiveChanges(tableId) {
