@@ -165,7 +165,25 @@ async function upsertHubDBRow(listing, tableId) {
 
   const rowUrl = "https://api.hubapi.com/cms/v3/hubdb/tables/" + tableId + "/rows";
   const existingId = await findExistingRowByAddress(formatted.address, tableId);
-  const payload = { values: formatted };
+  let payload = { values: formatted };
+
+if (existingId) {
+  try {
+    const existingRowRes = await axios.get(`${rowUrl}/${existingId}`, { headers });
+    const existingValues = existingRowRes.data && existingRowRes.data.values ? existingRowRes.data.values : {};
+
+    for (let i = 1; i <= 7; i++) {
+      const key = `photo_${i}`;
+      if (existingValues[key]) {
+        payload.values[key] = existingValues[key]; // Preserve existing image
+      } else {
+        delete payload.values[key]; // Avoid overwriting with null
+      }
+    }
+  } catch (err) {
+    console.warn("⚠️ Couldn't retrieve existing photos for row preservation:", formatted.name);
+  }
+}
 
   try {
     if (existingId) {
